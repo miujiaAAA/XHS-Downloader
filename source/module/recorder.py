@@ -7,7 +7,7 @@ from aiosqlite import connect
 if TYPE_CHECKING:
     from ..module import Manager
 
-__all__ = ["IDRecorder", "DataRecorder", "MapRecorder"]
+__all__ = ["IDRecorder", "DataRecorder", "MapRecorder", "KeyDataRecorder"]
 
 
 class IDRecorder:
@@ -189,3 +189,72 @@ class MapRecorder(IDRecorder):
         if self.switch:
             await self.cursor.execute("SELECT ID, NAME FROM mapping_data")
             return [i[0] for i in await self.cursor.fetchmany()]
+
+
+class KeyDataRecorder(IDRecorder):
+    """记录作品关键数据的数据库类"""
+    KEY_DATA_TABLE = (
+        ("作品ID", "TEXT PRIMARY KEY"),
+        ("作品标题", "TEXT"),
+        ("作者昵称", "TEXT"),
+        ("作者ID", "TEXT"),
+        ("下载地址", "TEXT"),
+        ("动图地址", "TEXT"),
+    )
+
+    def __init__(self, manager: "Manager"):
+        super().__init__(manager)
+        self.name = "KeyData.db"
+        self.file = manager.root.joinpath(self.name)
+        self.changed = True
+        self.switch = True  # 始终启用
+
+    async def _connect_database(self):
+        self.database = await connect(self.file)
+        self.cursor = await self.database.cursor()
+        await self.database.execute(f"""CREATE TABLE IF NOT EXISTS key_data (
+        {','.join(' '.join(i) for i in self.KEY_DATA_TABLE)}
+        );""")
+        await self.database.commit()
+
+    async def select(self, id_: str):
+        if self.switch:
+            await self.cursor.execute("SELECT * FROM key_data WHERE 作品ID=?", (id_,))
+            return await self.cursor.fetchone()
+
+    async def add(self, **kwargs) -> None:
+        if self.switch:
+            # 将列表类型转换为字符串
+            processed_data = {}
+            for key, value in kwargs.items():
+                if isinstance(value, list):
+                    processed_data[key] = " ".join(str(i) for i in value)
+                else:
+                    processed_data[key] = value
+
+            await self.database.execute(
+                f"""REPLACE INTO key_data (
+        {', '.join(i[0] for i in self.KEY_DATA_TABLE)}
+        ) VALUES (
+        {', '.join('?' for _ in self.KEY_DATA_TABLE)}
+        );""",
+                self.__generate_values(processed_data),
+            )
+            await self.database.commit()
+
+    async def __delete(self, id_: str) -> None:
+        if self.switch and id_:
+            await self.database.execute("DELETE FROM key_data WHERE 作品ID=?", (id_,))
+            await self.database.commit()
+
+    async def delete(self, ids: list | tuple):
+        if self.switch:
+            [await self.__delete(i) for i in ids]
+
+    async def all(self):
+        if self.switch:
+            await self.cursor.execute("SELECT * FROM key_data")
+            return await self.cursor.fetchall()
+
+    def __generate_values(self, data: dict) -> tuple:
+        return tuple(data.get(i, "") for i, _ in self.KEY_DATA_TABLE)
