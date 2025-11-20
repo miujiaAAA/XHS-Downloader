@@ -194,12 +194,12 @@ class MapRecorder(IDRecorder):
 class KeyDataRecorder(IDRecorder):
     """记录作品关键数据的数据库类"""
     KEY_DATA_TABLE = (
-        ("作品ID", "TEXT PRIMARY KEY"),
+        ("作品ID", "TEXT"),
         ("作品标题", "TEXT"),
         ("作者昵称", "TEXT"),
         ("作者ID", "TEXT"),
         ("下载地址", "TEXT"),
-        ("动图地址", "TEXT"),
+        ("下载类型", "TEXT"),
     )
 
     def __init__(self, manager: "Manager"):
@@ -224,21 +224,13 @@ class KeyDataRecorder(IDRecorder):
 
     async def add(self, **kwargs) -> None:
         if self.switch:
-            # 将列表类型转换为字符串
-            processed_data = {}
-            for key, value in kwargs.items():
-                if isinstance(value, list):
-                    processed_data[key] = " ".join(str(i) for i in value)
-                else:
-                    processed_data[key] = value
-
             await self.database.execute(
-                f"""REPLACE INTO key_data (
+                f"""INSERT INTO key_data (
         {', '.join(i[0] for i in self.KEY_DATA_TABLE)}
         ) VALUES (
         {', '.join('?' for _ in self.KEY_DATA_TABLE)}
         );""",
-                self.__generate_values(processed_data),
+                self.__generate_values(kwargs),
             )
             await self.database.commit()
 
@@ -250,6 +242,15 @@ class KeyDataRecorder(IDRecorder):
     async def delete(self, ids: list | tuple):
         if self.switch:
             [await self.__delete(i) for i in ids]
+
+    async def delete_by_work_id(self, work_id: str) -> None:
+        """
+        根据作品ID删除所有相关记录
+        
+        Args:
+            work_id (str): 作品ID
+        """
+        await self.__delete(work_id)
 
     async def all(self):
         if self.switch:

@@ -493,10 +493,10 @@ class XHS:
 
         await self.__web_download_files(data, download, index, log, bar)
         logging(log, _("作品处理完成：{0}").format(i))
-        # 获取data中的作品ID、作品标题、作者昵称、作者ID、下载地址、动图地址
+        # 保存关键数据到sqlite中
+        await self.save_key_data(data, log)
+        # 获取简化的关键数据用于返回
         key_data = await self.extract_key_data(data)
-        # 保存到sqlite中
-        await self.save_key_data(key_data, log)
         return key_data
 
     @staticmethod
@@ -526,18 +526,63 @@ class XHS:
             "动图地址": filtered_live_urls
         }
 
-    async def save_key_data(self, key_data: dict, log=None) -> None:
+    async def save_key_data(self, data: dict, log=None) -> None:
         """
-        保存关键数据到数据库
+        保存关键数据到数据库，将下载地址和动图地址拆分成多条记录
 
         Args:
-            key_data (dict): 关键数据字典
+            data (dict): 包含完整作品信息的字典
             log: 日志对象
         """
-
         try:
-            await self.key_data_recorder.add(**key_data)
-            logging(log, _("关键数据保存成功：{0}").format(key_data.get("作品ID", "")))
+            # 提取基本信息
+            work_id = data.get("作品ID", "")
+            work_title = data.get("作品标题", "")
+            author_name = data.get("作者昵称", "")
+            author_id = data.get("作者ID", "")
+            
+            # 先删除同作品ID的旧数据
+            await self.key_data_recorder.delete_by_work_id(work_id)
+            
+            # 获取下载地址列表
+            download_urls = data.get("下载地址", [])
+            if not isinstance(download_urls, list):
+                download_urls = [download_urls] if download_urls else []
+            
+            # 获取动图地址列表
+            live_urls = data.get("动图地址", [])
+            if not isinstance(live_urls, list):
+                live_urls = [live_urls] if live_urls else []
+            # 过滤空值
+            live_urls = [url for url in live_urls if url]
+            
+            # 保存普通图片/视频地址
+            for url in download_urls:
+                if url:  # 过滤空值
+                    key_data = {
+                        "作品ID": work_id,
+                        "作品标题": work_title,
+                        "作者昵称": author_name,
+                        "作者ID": author_id,
+                        "下载地址": url,
+                        "下载类型": "图片",
+                    }
+                    await self.key_data_recorder.add(**key_data)
+            
+            # 保存动图地址
+            for url in live_urls:
+                key_data = {
+                    "作品ID": work_id,
+                    "作品标题": work_title,
+                    "作者昵称": author_name,
+                    "作者ID": author_id,
+                    "下载地址": url,
+                    "下载类型": "动图",
+                }
+                await self.key_data_recorder.add(**key_data)
+            
+            total_count = len([u for u in download_urls if u]) + len(live_urls)
+            logging(log, _("关键数据保存成功：{0}，共 {1} 条记录").format(work_id, total_count))
         except Exception as e:
             logging(log, _("关键数据保存失败：{0}").format(str(e)), ERROR)
 
